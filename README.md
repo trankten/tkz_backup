@@ -18,15 +18,15 @@ Pensada principalmente para crear imágenes de **dispositivos USB** desde Window
 
 #### Instalaciones de Windows detectadas y backup de drivers
 
-![Instalaciones de Windows detectadas y backup de drivers](screenshots/TKZ_Backup_v1.1_01_detect_windows.png)
+<img width="946" height="643" alt="imagen" src="https://github.com/user-attachments/assets/b3180ca8-c0de-4267-b358-fc11ec70e968" />
 
 #### Backup de drivers finalizado
 
-![Backup de drivers finalizado](screenshots/TKZ_Backup_v1.1_02_backup_drivers_done.png)
+<img width="346" height="315" alt="imagen" src="https://github.com/user-attachments/assets/2a7b0c58-e3c7-4762-8832-cb22558ac604" />
 
 #### Interfaz principal en inglés
 
-![Main window English](screenshots/TKZ_Backup_v1.1_03_main_english.png)
+<img width="950" height="632" alt="imagen" src="https://github.com/user-attachments/assets/ff6f6db3-e6fa-41a0-bee2-980ad1f99abe" />
 
 </details>
 
