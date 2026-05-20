@@ -10,6 +10,26 @@ Herramienta de **backup de discos y particiones** con compresión *on-the-fly* (
 
 Pensada principalmente para crear imágenes de **dispositivos USB** desde Windows, pero el código es multiplataforma (Windows / Linux / macOS).
 
+
+### Capturas de pantalla
+
+<details>
+<summary>Ver capturas</summary>
+
+#### Instalaciones de Windows detectadas y backup de drivers
+
+![Instalaciones de Windows detectadas y backup de drivers](screenshots/TKZ_Backup_v1.1_01_detect_windows.png)
+
+#### Backup de drivers finalizado
+
+![Backup de drivers finalizado](screenshots/TKZ_Backup_v1.1_02_backup_drivers_done.png)
+
+#### Interfaz principal en inglés
+
+![Main window English](screenshots/TKZ_Backup_v1.1_03_main_english.png)
+
+</details>
+
 ### Características
 
 - GUI nativa (Tkinter / ttk) con i18n **Español / Inglés** y cambio de idioma en caliente.
