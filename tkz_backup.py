@@ -1,11 +1,13 @@
 import os
 import sys
+import re
 import ctypes
 import threading
 import time
 import gzip
 import zipfile
 import tarfile
+import shutil
 import subprocess
 import json
 import platform
@@ -16,13 +18,188 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 NOMBRE_APP = "TKZ Backup"
-VERSION = "1.0"
+VERSION = "1.1"
 URL_REPO = "https://github.com/trankten/tkz_backup"
 URL_KOFI = "https://ko-fi.com/trankten"
 
 TAMANO_BLOQUE = 16 * 1024 * 1024
 COLA_MAX = 4
 NIVEL_COMPRESION = 1
+
+# Rutas típicas donde los fabricantes dejan instaladores originales de drivers
+# (oro puro cuando el fabricante ya no da soporte o ha desaparecido)
+RUTAS_OEM_INSTALADORES = [
+    "Drivers",
+    "SWSetup",
+    "SWTOOLS",
+    "OEM",
+    "Dell",
+    "Intel",
+    "AMD",
+    "NVIDIA",
+    "MSI",
+    "ASUS",
+    "Lenovo",
+    "HP",
+]
+
+TRADUCCIONES = {
+    "es": {
+        "subtitulo": "Backup de dispositivos con compresión on-the-fly",
+        "refrescar": "Refrescar",
+        "github": "GitHub",
+        "kofi": "❤ Ko-fi",
+        "buscar_windows": "Buscar OS Windows",
+        "opciones": "Opciones",
+        "formato": "Formato:",
+        "calc_hash": "Calcular SHA-256 (verificable)",
+        "crear_backup": "Crear backup…",
+        "verificar_backup": "Verificar backup…",
+        "cancelar": "Cancelar",
+        "listo": "Listo.",
+        "aviso_admin": "AVISO: se requieren permisos de Administrador.",
+        "col_disp": "Dispositivo",
+        "col_modelo": "Modelo / Partición",
+        "col_tam": "Tamaño",
+        "col_bus": "Bus / Tipo",
+        "n_discos": "{n} disco(s) detectado(s).",
+        "err_listar": "Error al listar dispositivos:\n{e}",
+        "err_admin": "Se requieren permisos de Administrador para leer dispositivos.",
+        "sel_disp": "Selecciona un disco o partición de la lista.",
+        "tam_desconocido": "No se conoce el tamaño. ¿Continuar?",
+        "guardar_como": "Guardar backup como…",
+        "confirmar_backup": "Crear backup de:\n  {r}\n  {m}  ({t})\n\nDestino:\n  {o}\n\n¿Continuar?",
+        "iniciando": "Iniciando backup de {r}…",
+        "completado_msg": "Backup completado correctamente.",
+        "sha_guardado": "\n\nSHA-256:\n{h}\n\nGuardado en .sha256 junto al backup.",
+        "estado_completado": "Backup completado.",
+        "cancelado_user": "Cancelado por el usuario.",
+        "cancelando": "Cancelando…",
+        "sel_verificar": "Selecciona el backup a verificar…",
+        "no_sidecar": "No se encontró el sidecar .sha256.\n¿Introducir el hash manualmente?",
+        "hash_label": "SHA-256 esperado (deja vacío para solo calcular):",
+        "verificando": "Verificando {f}…",
+        "verif_cancelada": "Verificación cancelada.",
+        "hash_calculado": "Hash calculado (sin comparar).",
+        "hash_msg": "SHA-256 calculado:\n{h}",
+        "integ_ok": "Integridad OK ✓",
+        "integ_ok_msg": "Integridad verificada correctamente.\n\nSHA-256:\n{h}",
+        "integ_fail": "Integridad FALLIDA ✗",
+        "integ_fail_msg": "El hash NO coincide.\n\nCalculado:\n{h}",
+        "buscando_win": "Buscando instalaciones Windows…",
+        "win_no_encontradas": "No se han encontrado instalaciones de Windows.\n\n"
+            "Sólo se pueden inspeccionar particiones con letra de unidad asignada y "
+            "sistema de ficheros legible. Si la partición no tiene letra, asígnale una "
+            "desde el Administrador de discos.",
+        "win_encontradas": "Instalaciones de Windows detectadas",
+        "win_partition": "Partición {l}:  ({v})",
+        "btn_backup_drivers": "Backup Drivers",
+        "drivers_titulo": "Backup de drivers",
+        "drivers_modo": "Formato de salida:",
+        "drivers_carpeta": "Carpeta (recomendado para reinstalación directa)",
+        "drivers_zip": "ZIP único (recomendado para archivar / transportar)",
+        "drivers_alcance": "Alcance:",
+        "drivers_alcance_completo": "Completo: DriverStore + OEM .inf + binarios .sys + catálogos + instaladores OEM",
+        "drivers_alcance_rapido": "Sólo DriverStore (rápido)",
+        "drivers_sel_carpeta": "Selecciona la carpeta destino para los drivers",
+        "drivers_sel_zip": "Guardar drivers como ZIP",
+        "drivers_iniciando": "Copiando drivers de {l}: …",
+        "drivers_progreso": "{f} ficheros  ·  {n} paquetes  ·  {t}",
+        "drivers_completado_t": "Backup de drivers finalizado",
+        "drivers_completado": "Backup de drivers finalizado.\n\nPaquetes: {n}\nFicheros: {f}\nTamaño copiado: {t}\n\nDestino:\n{d}",
+        "drivers_error": "Error al copiar drivers:\n{e}",
+        "drivers_no_windows": "Esta partición no contiene una instalación de Windows válida.",
+        "iniciar": "Iniciar",
+        "cerrar": "Cerrar",
+        "idioma": "Idioma:",
+        "formato_sin_comp": "img (sin comprimir)",
+        "ttl_aviso": NOMBRE_APP,
+    },
+    "en": {
+        "subtitulo": "Device backup with on-the-fly compression",
+        "refrescar": "Refresh",
+        "github": "GitHub",
+        "kofi": "❤ Ko-fi",
+        "buscar_windows": "Find Windows OS",
+        "opciones": "Options",
+        "formato": "Format:",
+        "calc_hash": "Compute SHA-256 (verifiable)",
+        "crear_backup": "Create backup…",
+        "verificar_backup": "Verify backup…",
+        "cancelar": "Cancel",
+        "listo": "Ready.",
+        "aviso_admin": "WARNING: Administrator privileges are required.",
+        "col_disp": "Device",
+        "col_modelo": "Model / Partition",
+        "col_tam": "Size",
+        "col_bus": "Bus / Type",
+        "n_discos": "{n} disk(s) detected.",
+        "err_listar": "Error listing devices:\n{e}",
+        "err_admin": "Administrator privileges are required to read devices.",
+        "sel_disp": "Select a disk or partition from the list.",
+        "tam_desconocido": "Device size is unknown. Continue anyway?",
+        "guardar_como": "Save backup as…",
+        "confirmar_backup": "Create backup of:\n  {r}\n  {m}  ({t})\n\nDestination:\n  {o}\n\nContinue?",
+        "iniciando": "Starting backup of {r}…",
+        "completado_msg": "Backup completed successfully.",
+        "sha_guardado": "\n\nSHA-256:\n{h}\n\nSaved in a .sha256 sidecar next to the backup.",
+        "estado_completado": "Backup completed.",
+        "cancelado_user": "Cancelled by the user.",
+        "cancelando": "Cancelling…",
+        "sel_verificar": "Select the backup to verify…",
+        "no_sidecar": "No .sha256 sidecar found.\nDo you want to enter the hash manually?",
+        "hash_label": "Expected SHA-256 (leave empty to only compute):",
+        "verificando": "Verifying {f}…",
+        "verif_cancelada": "Verification cancelled.",
+        "hash_calculado": "Hash computed (not compared).",
+        "hash_msg": "SHA-256 computed:\n{h}",
+        "integ_ok": "Integrity OK ✓",
+        "integ_ok_msg": "Integrity verified successfully.\n\nSHA-256:\n{h}",
+        "integ_fail": "Integrity FAILED ✗",
+        "integ_fail_msg": "Hash does NOT match.\n\nComputed:\n{h}",
+        "buscando_win": "Searching for Windows installations…",
+        "win_no_encontradas": "No Windows installations found.\n\n"
+            "Only partitions with an assigned drive letter and a readable file system "
+            "can be inspected. If the partition has no letter, assign one from Disk Manager.",
+        "win_encontradas": "Detected Windows installations",
+        "win_partition": "Partition {l}:  ({v})",
+        "btn_backup_drivers": "Backup Drivers",
+        "drivers_titulo": "Driver backup",
+        "drivers_modo": "Output format:",
+        "drivers_carpeta": "Folder (recommended for direct reinstall)",
+        "drivers_zip": "Single ZIP (recommended for archiving / transport)",
+        "drivers_alcance": "Scope:",
+        "drivers_alcance_completo": "Full: DriverStore + OEM .inf + .sys binaries + catalogs + OEM installers",
+        "drivers_alcance_rapido": "DriverStore only (fast)",
+        "drivers_sel_carpeta": "Select the destination folder for the drivers",
+        "drivers_sel_zip": "Save drivers as ZIP",
+        "drivers_iniciando": "Copying drivers from {l}: …",
+        "drivers_progreso": "{f} files  ·  {n} packages  ·  {t}",
+        "drivers_completado_t": "Driver backup finished",
+        "drivers_completado": "Driver backup finished.\n\nPackages: {n}\nFiles: {f}\nSize copied: {t}\n\nDestination:\n{d}",
+        "drivers_error": "Error copying drivers:\n{e}",
+        "drivers_no_windows": "This partition does not contain a valid Windows installation.",
+        "iniciar": "Start",
+        "cerrar": "Close",
+        "idioma": "Language:",
+        "formato_sin_comp": "img (uncompressed)",
+        "ttl_aviso": NOMBRE_APP,
+    },
+}
+
+idioma_actual = "es"
+
+
+def t(clave, **kw):
+    val = TRADUCCIONES.get(idioma_actual, {}).get(clave)
+    if val is None:
+        val = TRADUCCIONES["en"].get(clave, clave)
+    if kw:
+        try:
+            return val.format(**kw)
+        except Exception:
+            return val
+    return val
 
 
 def es_admin():
@@ -81,12 +258,13 @@ def listar_dispositivos_windows():
         num = d.get("Number")
         if num is None:
             continue
+        bus = d.get("BusType")
         discos.append({
             "tipo": "disco",
             "ruta": f"\\\\.\\PhysicalDrive{num}",
             "modelo": (d.get("FriendlyName") or "Disco").strip(),
             "tamano": int(d.get("Size") or 0),
-            "bus": (d.get("BusType") or "").strip() if isinstance(d.get("BusType"), str) else str(d.get("BusType") or ""),
+            "bus": bus if isinstance(bus, str) else str(bus or ""),
             "indice": num,
             "particiones": [],
         })
@@ -99,6 +277,12 @@ def listar_dispositivos_windows():
         letra = p.get("DriveLetter")
         if isinstance(letra, dict):
             letra = letra.get("Value")
+        if isinstance(letra, int):
+            letra = chr(letra) if letra > 31 else None
+        if letra:
+            letra = str(letra).strip("\x00 ").upper()
+            if not letra or not letra[0].isalpha():
+                letra = None
         if letra:
             etiqueta = f"Partición {pi} ({letra}:)"
         else:
@@ -109,6 +293,7 @@ def listar_dispositivos_windows():
             "modelo": etiqueta,
             "tamano": int(p.get("Size") or 0),
             "bus": str(p.get("Type") or ""),
+            "letra": letra,
         })
     return discos
 
@@ -141,6 +326,7 @@ def listar_dispositivos_linux():
                 "modelo": etiqueta,
                 "tamano": int(hijo.get("size") or 0),
                 "bus": "",
+                "letra": mp or None,
             })
         discos.append(disco)
     return discos
@@ -168,6 +354,7 @@ def listar_dispositivos_mac():
                 "modelo": p.get("VolumeName") or p["DeviceIdentifier"],
                 "tamano": int(p.get("Size") or 0),
                 "bus": p.get("Content") or "",
+                "letra": None,
             })
         discos.append(disco)
     return discos
@@ -184,6 +371,38 @@ def listar_dispositivos():
     return []
 
 
+def detectar_windows_en_particion(letra):
+    if not letra:
+        return None
+    base = f"{letra}:\\" if platform.system() == "Windows" else letra
+    sis = os.path.join(base, "Windows", "System32", "config", "SYSTEM")
+    if not os.path.exists(sis):
+        return None
+    ver = "Windows"
+    ver_dir = os.path.join(base, "Windows", "servicing", "Version")
+    if os.path.isdir(ver_dir):
+        try:
+            vs = [n for n in os.listdir(ver_dir) if os.path.isdir(os.path.join(ver_dir, n))]
+            vs.sort(key=lambda s: [int(x) if x.isdigit() else 0 for x in re.split(r"[.]", s)])
+            if vs:
+                v = vs[-1]
+                major = v.split(".")[0]
+                # heurística rápida: 10.0.10xxx -> Win10, 10.0.22xxx -> Win11, 6.x -> Win7/8
+                if major == "10":
+                    build = v.split(".")[2] if len(v.split(".")) >= 3 else ""
+                    if build and build.isdigit() and int(build) >= 22000:
+                        ver = f"Windows 11 ({v})"
+                    else:
+                        ver = f"Windows 10 ({v})"
+                elif major == "6":
+                    ver = f"Windows 7/8 ({v})"
+                else:
+                    ver = f"Windows {v}"
+        except OSError:
+            pass
+    return ver
+
+
 class _LectorRawWin32:
     def __init__(self, ruta):
         GENERIC_READ = 0x80000000
@@ -198,7 +417,7 @@ class _LectorRawWin32:
             ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
             ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
         ]
-        # NO_BUFFERING fuerza I/O alineado al sector pero da bastante más velocidad en HDD/SSD
+        # NO_BUFFERING fuerza I/O alineado al sector pero da bastante más velocidad
         flags = FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING
         h = k.CreateFileW(
             ruta, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -445,17 +664,448 @@ class VerificadorBackup(threading.Thread):
                 pass
 
 
+def _parsear_inf(ruta_inf):
+    # parser minimalista de .inf: sólo extraemos los campos típicos de [Version]
+    info = {"Provider": "", "Class": "", "DriverVer": "", "CatalogFile": ""}
+    seccion = ""
+    try:
+        with open(ruta_inf, "r", encoding="utf-16", errors="ignore") as fh:
+            datos = fh.read()
+    except Exception:
+        try:
+            with open(ruta_inf, "r", encoding="latin-1", errors="ignore") as fh:
+                datos = fh.read()
+        except Exception:
+            return info
+    for linea in datos.splitlines():
+        bruta = linea.strip()
+        if not bruta or bruta.startswith(";"):
+            continue
+        if bruta.startswith("[") and bruta.endswith("]"):
+            seccion = bruta[1:-1].strip().lower()
+            continue
+        if seccion != "version":
+            continue
+        if "=" not in bruta:
+            continue
+        k, _, v = bruta.partition("=")
+        k = k.strip()
+        v = v.split(";", 1)[0].strip().strip('"')
+        if k in info and not info[k]:
+            info[k] = v
+    return info
+
+
+LEEME_DRIVERS_ES = """TKZ Backup — Backup de drivers de una instalación Windows
+==========================================================
+
+Contenido de este backup:
+  FileRepository/         Paquetes de drivers del DriverStore (todos los drivers
+                          de terceros instalados por Plug and Play).
+  INF/                    Copias indexadas oem*.inf + oem*.PNF que mapean cada
+                          paquete del DriverStore con el dispositivo que lo usa.
+  System32_drivers/       Binarios .sys cargados por el kernel. Importante para
+                          drivers legacy (Windows 7) que no usan DriverStore.
+  CatRoot/                Catálogos de firma digital (.cat). Sin ellos algunas
+                          firmas de drivers no pueden verificarse al reinstalar.
+  OEM_Installers/         Instaladores originales del fabricante que estaban
+                          guardados en carpetas tipo C:\\Drivers, C:\\SWSetup,
+                          C:\\Dell\\Drivers, C:\\SWTOOLS\\DRIVERS, C:\\OEM…
+                          Son ORO PURO cuando el fabricante ya no existe.
+  manifest.json           Listado de todos los paquetes con Provider / Class /
+                          DriverVer / CatalogFile parseado de cada .inf.
+
+Cómo reinstalar en otro Windows
+-------------------------------
+1) Copia (o extrae) la carpeta FileRepository a, por ejemplo, C:\\TKZ_Drivers
+2) Abre PowerShell como Administrador y ejecuta:
+
+   pnputil /add-driver C:\\TKZ_Drivers\\FileRepository\\*\\*.inf /subdirs /install
+
+   Esto añade todos los paquetes al DriverStore del nuevo sistema y, donde sea
+   posible, los instala para los dispositivos detectados.
+
+3) Si algún dispositivo concreto no recoge el driver automáticamente:
+   - Administrador de dispositivos -> botón derecho sobre el dispositivo
+     amarillo -> Actualizar controlador -> Buscar en mi equipo -> apuntar a
+     C:\\TKZ_Drivers\\FileRepository (marca "incluir subcarpetas").
+
+4) Para drivers OEM con instalador propio mira en OEM_Installers/, ejecuta los
+   .exe o .msi correspondientes (suelen ser drivers de chipset, control de
+   ventiladores, lectores de huella, hotkeys, etc).
+"""
+
+LEEME_DRIVERS_EN = """TKZ Backup — Driver backup from a Windows installation
+=======================================================
+
+Contents of this backup:
+  FileRepository/         Driver packages from the DriverStore (all 3rd-party
+                          drivers installed by Plug and Play).
+  INF/                    Indexed oem*.inf + oem*.PNF mapping each DriverStore
+                          package to the device that uses it.
+  System32_drivers/       .sys binaries loaded by the kernel. Important for
+                          legacy drivers (Windows 7) that don't use DriverStore.
+  CatRoot/                Driver signature catalogs (.cat). Without them some
+                          signatures cannot be verified on reinstall.
+  OEM_Installers/         Original vendor installers found in folders such as
+                          C:\\Drivers, C:\\SWSetup, C:\\Dell\\Drivers,
+                          C:\\SWTOOLS\\DRIVERS, C:\\OEM…
+                          GOLD when the vendor no longer exists.
+  manifest.json           List of all packages with Provider / Class /
+                          DriverVer / CatalogFile parsed from each .inf.
+
+How to reinstall on another Windows
+-----------------------------------
+1) Copy (or extract) the FileRepository folder to, e.g., C:\\TKZ_Drivers
+2) Open PowerShell as Administrator and run:
+
+   pnputil /add-driver C:\\TKZ_Drivers\\FileRepository\\*\\*.inf /subdirs /install
+
+3) For specific devices not picked up automatically, use Device Manager ->
+   Update driver -> Browse my computer -> point to C:\\TKZ_Drivers\\FileRepository
+   (check "Include subfolders").
+
+4) For OEM drivers with their own installer, see OEM_Installers/ and run the
+   matching .exe / .msi (chipset, fan control, fingerprint readers, hotkeys…).
+"""
+
+
+class TrabajadorDrivers(threading.Thread):
+    def __init__(self, letra, destino, modo, completo, cb_progreso, cb_fin):
+        super().__init__(daemon=True)
+        self.letra = letra
+        self.destino = destino
+        self.modo = modo
+        self.completo = completo
+        self.cb_progreso = cb_progreso
+        self.cb_fin = cb_fin
+        self.parar = threading.Event()
+        self.ficheros = 0
+        self.paquetes = 0
+        self.bytes = 0
+        self._zip = None
+        self._dest_dir = None
+        self._manifest = []
+
+    def cancelar(self):
+        self.parar.set()
+
+    def _tick(self):
+        self.cb_progreso(self.ficheros, self.paquetes, self.bytes)
+
+    def _escribir_fichero(self, ruta_src, arcname):
+        if self.parar.is_set():
+            return
+        try:
+            tam = os.path.getsize(ruta_src)
+        except OSError:
+            return
+        try:
+            if self._zip is not None:
+                self._zip.write(ruta_src, arcname)
+            else:
+                destino_full = os.path.join(self._dest_dir, arcname.replace("/", os.sep))
+                os.makedirs(os.path.dirname(destino_full), exist_ok=True)
+                shutil.copy2(ruta_src, destino_full)
+        except (OSError, PermissionError):
+            return
+        self.ficheros += 1
+        self.bytes += tam
+        if self.ficheros % 50 == 0:
+            self._tick()
+
+    def _escribir_texto(self, arcname, texto):
+        if self._zip is not None:
+            self._zip.writestr(arcname, texto)
+        else:
+            destino_full = os.path.join(self._dest_dir, arcname.replace("/", os.sep))
+            os.makedirs(os.path.dirname(destino_full) or self._dest_dir, exist_ok=True)
+            with open(destino_full, "w", encoding="utf-8") as f:
+                f.write(texto)
+
+    def _copiar_arbol(self, raiz_src, prefijo_dest, indexar_inf=False):
+        if not os.path.isdir(raiz_src):
+            return
+        for dirpath, dirnames, filenames in os.walk(raiz_src):
+            if self.parar.is_set():
+                return
+            # nos saltamos carpetas de telemetría / temporales que no aportan
+            dirnames[:] = [d for d in dirnames if d.lower() not in (
+                "$recycle.bin", "system volume information", "windowsapps")]
+            for nombre in filenames:
+                if self.parar.is_set():
+                    return
+                full = os.path.join(dirpath, nombre)
+                rel = os.path.relpath(full, raiz_src).replace("\\", "/")
+                arc = f"{prefijo_dest}/{rel}"
+                if indexar_inf and nombre.lower().endswith(".inf"):
+                    info = _parsear_inf(full)
+                    info["inf"] = arc
+                    info["package_dir"] = os.path.basename(os.path.dirname(full))
+                    self._manifest.append(info)
+                self._escribir_fichero(full, arc)
+            # contamos un "paquete" por cada subcarpeta directa de FileRepository
+            if indexar_inf and os.path.normpath(dirpath) != os.path.normpath(raiz_src):
+                rel_dir = os.path.relpath(dirpath, raiz_src)
+                if os.sep not in rel_dir and rel_dir != ".":
+                    pass
+
+    def run(self):
+        try:
+            base = f"{self.letra}:\\"
+            if not os.path.isdir(os.path.join(base, "Windows")):
+                self.cb_fin(t("drivers_no_windows"), self.paquetes, self.ficheros, self.bytes)
+                return
+
+            if self.modo == "zip":
+                self._zip = zipfile.ZipFile(
+                    self.destino, "w", zipfile.ZIP_DEFLATED,
+                    allowZip64=True, compresslevel=NIVEL_COMPRESION,
+                )
+            else:
+                self._dest_dir = self.destino
+                os.makedirs(self._dest_dir, exist_ok=True)
+
+            try:
+                # 1) DriverStore\FileRepository (núcleo)
+                store = os.path.join(base, "Windows", "System32", "DriverStore", "FileRepository")
+                if os.path.isdir(store):
+                    try:
+                        self.paquetes = sum(
+                            1 for n in os.listdir(store)
+                            if os.path.isdir(os.path.join(store, n))
+                        )
+                    except OSError:
+                        pass
+                    self._copiar_arbol(store, "FileRepository", indexar_inf=True)
+
+                if self.completo and not self.parar.is_set():
+                    # 2) Windows\INF (oem*.inf, oem*.PNF, setupapi logs)
+                    inf_dir = os.path.join(base, "Windows", "INF")
+                    if os.path.isdir(inf_dir):
+                        for nombre in os.listdir(inf_dir):
+                            full = os.path.join(inf_dir, nombre)
+                            if not os.path.isfile(full):
+                                continue
+                            low = nombre.lower()
+                            if (low.startswith("oem") and (low.endswith(".inf") or low.endswith(".pnf"))) \
+                                    or low.startswith("setupapi"):
+                                self._escribir_fichero(full, f"INF/{nombre}")
+
+                    # 3) System32\drivers\*.sys (binarios kernel)
+                    drv_dir = os.path.join(base, "Windows", "System32", "drivers")
+                    if os.path.isdir(drv_dir):
+                        for nombre in os.listdir(drv_dir):
+                            if self.parar.is_set():
+                                break
+                            full = os.path.join(drv_dir, nombre)
+                            if os.path.isfile(full) and nombre.lower().endswith((".sys", ".dll")):
+                                self._escribir_fichero(full, f"System32_drivers/{nombre}")
+
+                    # 4) CatRoot (catálogos de firma)
+                    cat_dir = os.path.join(base, "Windows", "System32", "CatRoot")
+                    if os.path.isdir(cat_dir):
+                        self._copiar_arbol(cat_dir, "CatRoot")
+
+                    # 5) Instaladores OEM en raíz — aquí está el oro de fabricantes muertos
+                    for nombre in RUTAS_OEM_INSTALADORES:
+                        candidato = os.path.join(base, nombre)
+                        if os.path.isdir(candidato):
+                            self._copiar_arbol(candidato, f"OEM_Installers/{nombre}")
+
+                    # 6) ProgramData de algunos fabricantes (Dell SupportAssist guarda drivers)
+                    pdata = os.path.join(base, "ProgramData")
+                    if os.path.isdir(pdata):
+                        for marca in ("Dell", "HP", "Lenovo", "ASUS", "MSI"):
+                            cand = os.path.join(pdata, marca)
+                            if os.path.isdir(cand):
+                                self._copiar_arbol(cand, f"OEM_Installers/ProgramData_{marca}")
+
+                # manifest + leeme
+                self._escribir_texto("manifest.json", json.dumps({
+                    "app": NOMBRE_APP,
+                    "version": VERSION,
+                    "letra_origen": self.letra,
+                    "creado": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "paquetes": self._manifest,
+                    "totales": {
+                        "ficheros": self.ficheros,
+                        "bytes": self.bytes,
+                        "paquetes_filerepo": self.paquetes,
+                    },
+                }, indent=2, ensure_ascii=False))
+                self._escribir_texto("LEEME.txt", LEEME_DRIVERS_ES)
+                self._escribir_texto("README.txt", LEEME_DRIVERS_EN)
+            finally:
+                if self._zip is not None:
+                    self._zip.close()
+
+            if self.parar.is_set():
+                self.cb_fin("cancelado", self.paquetes, self.ficheros, self.bytes)
+            else:
+                self.cb_fin(None, self.paquetes, self.ficheros, self.bytes)
+        except Exception as e:
+            self.cb_fin(str(e), self.paquetes, self.ficheros, self.bytes)
+
+
+class DialogoBackupDrivers(tk.Toplevel):
+    def __init__(self, padre, letra, version):
+        super().__init__(padre)
+        self.padre = padre
+        self.letra = letra
+        self.version = version
+        self.title(f"{t('drivers_titulo')} — {letra}: ({version})")
+        self.transient(padre)
+        self.grab_set()
+        self.geometry("620x340")
+        self.resizable(False, False)
+        self.trabajo = None
+        self._construir()
+
+    def _construir(self):
+        cont = ttk.Frame(self, padding=14)
+        cont.pack(fill="both", expand=True)
+        ttk.Label(cont, text=f"{self.letra}:  —  {self.version}",
+                  font=("Segoe UI", 12, "bold")).pack(anchor="w")
+
+        ttk.Label(cont, text=t("drivers_modo")).pack(anchor="w", pady=(10, 2))
+        self.modo = tk.StringVar(value="carpeta")
+        ttk.Radiobutton(cont, text=t("drivers_carpeta"), variable=self.modo, value="carpeta").pack(anchor="w")
+        ttk.Radiobutton(cont, text=t("drivers_zip"), variable=self.modo, value="zip").pack(anchor="w")
+
+        ttk.Label(cont, text=t("drivers_alcance")).pack(anchor="w", pady=(10, 2))
+        self.completo = tk.BooleanVar(value=True)
+        ttk.Radiobutton(cont, text=t("drivers_alcance_completo"),
+                        variable=self.completo, value=True).pack(anchor="w")
+        ttk.Radiobutton(cont, text=t("drivers_alcance_rapido"),
+                        variable=self.completo, value=False).pack(anchor="w")
+
+        self.barra = ttk.Progressbar(cont, mode="indeterminate")
+        self.barra.pack(fill="x", pady=(14, 4))
+        self.estado = ttk.Label(cont, text="")
+        self.estado.pack(anchor="w")
+
+        botones = ttk.Frame(cont)
+        botones.pack(fill="x", pady=(10, 0))
+        self.btn_iniciar = ttk.Button(botones, text=t("iniciar"), command=self.iniciar)
+        self.btn_iniciar.pack(side="right")
+        self.btn_cerrar = ttk.Button(botones, text=t("cerrar"), command=self.destroy)
+        self.btn_cerrar.pack(side="right", padx=6)
+
+    def iniciar(self):
+        if self.modo.get() == "zip":
+            destino = filedialog.asksaveasfilename(
+                parent=self,
+                title=t("drivers_sel_zip"),
+                defaultextension=".zip",
+                initialfile=f"TKZ_Drivers_{self.letra}.zip",
+                filetypes=[("ZIP", "*.zip")],
+            )
+        else:
+            destino = filedialog.askdirectory(parent=self, title=t("drivers_sel_carpeta"),
+                                              mustexist=False)
+            if destino:
+                destino = os.path.join(destino, f"TKZ_Drivers_{self.letra}")
+        if not destino:
+            return
+        self.btn_iniciar.configure(state="disabled")
+        self.barra.start(60)
+        self.estado.configure(text=t("drivers_iniciando", l=self.letra))
+        self.trabajo = TrabajadorDrivers(
+            self.letra, destino, self.modo.get(), self.completo.get(),
+            self._cb_progreso, self._cb_fin,
+        )
+        self.trabajo.start()
+
+    def _cb_progreso(self, ficheros, paquetes, bts):
+        def upd():
+            self.estado.configure(text=t("drivers_progreso",
+                                          f=ficheros, n=paquetes, t=tamano_legible(bts)))
+        self.after(0, upd)
+
+    def _cb_fin(self, err, paquetes, ficheros, bts):
+        def upd():
+            self.barra.stop()
+            self.barra.configure(mode="determinate", value=100, maximum=100)
+            self.btn_iniciar.configure(state="normal")
+            if err is None:
+                msg = t("drivers_completado", n=paquetes, f=ficheros,
+                        t=tamano_legible(bts), d=self.trabajo.destino)
+                self.estado.configure(text=t("drivers_completado_t"))
+                messagebox.showinfo(t("drivers_titulo"), msg, parent=self)
+            elif err == "cancelado":
+                self.estado.configure(text=t("cancelado_user"))
+            else:
+                self.estado.configure(text=err)
+                messagebox.showerror(t("drivers_titulo"), t("drivers_error", e=err), parent=self)
+        self.after(0, upd)
+
+
+class DialogoWindows(tk.Toplevel):
+    def __init__(self, padre, encontradas):
+        super().__init__(padre)
+        self.padre = padre
+        self.title(t("win_encontradas"))
+        self.transient(padre)
+        self.grab_set()
+        self.geometry("560x360")
+        cont = ttk.Frame(self, padding=14)
+        cont.pack(fill="both", expand=True)
+        ttk.Label(cont, text=t("win_encontradas"),
+                  font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
+        for letra, version in encontradas:
+            fila = ttk.Frame(cont)
+            fila.pack(fill="x", pady=4)
+            ttk.Label(fila, text=t("win_partition", l=letra, v=version)).pack(side="left")
+            ttk.Button(fila, text=t("btn_backup_drivers"),
+                       command=lambda l=letra, v=version: DialogoBackupDrivers(self, l, v)
+                       ).pack(side="right")
+        ttk.Button(cont, text=t("cerrar"), command=self.destroy).pack(side="bottom", pady=(10, 0))
+
+
 class Aplicacion(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"{NOMBRE_APP} v{VERSION}")
-        self.geometry("900x600")
-        self.minsize(780, 520)
+        self.geometry("960x620")
+        self.minsize(820, 540)
         self.trabajo = None
         self.dispositivos = []
         self.indice_filas = {}
+        self.widgets_i18n = []
         self._construir()
+        self._aplicar_idioma()
         self.after(100, self.refrescar_dispositivos)
+
+    def _i18n(self, widget, clave, atrib="text"):
+        self.widgets_i18n.append((widget, clave, atrib))
+
+    def _aplicar_idioma(self):
+        for widget, clave, atrib in self.widgets_i18n:
+            try:
+                widget.configure(**{atrib: t(clave)})
+            except tk.TclError:
+                pass
+        try:
+            self.arbol.heading("ruta", text=t("col_disp"))
+            self.arbol.heading("modelo", text=t("col_modelo"))
+            self.arbol.heading("tamano", text=t("col_tam"))
+            self.arbol.heading("bus", text=t("col_bus"))
+        except Exception:
+            pass
+        # texto de estado por defecto si está vacío
+        if not self.estado.cget("text") or self.estado.cget("text") in (
+            TRADUCCIONES["es"]["listo"], TRADUCCIONES["en"]["listo"],
+            TRADUCCIONES["es"]["aviso_admin"], TRADUCCIONES["en"]["aviso_admin"],
+        ):
+            self.estado.configure(text=t("listo") if es_admin() else t("aviso_admin"))
+
+    def _cambiar_idioma(self, evento=None):
+        global idioma_actual
+        mapa = {"Español": "es", "English": "en"}
+        seleccion = self.cmb_idioma.get()
+        idioma_actual = mapa.get(seleccion, "en")
+        self._aplicar_idioma()
 
     def _construir(self):
         estilo = ttk.Style(self)
@@ -470,60 +1120,77 @@ class Aplicacion(tk.Tk):
         cab.pack(fill="x")
         ttk.Label(cab, text=NOMBRE_APP, font=("Segoe UI", 18, "bold")).pack(side="left")
         ttk.Label(cab, text=f"v{VERSION}", foreground="#888").pack(side="left", padx=(6, 12))
-        ttk.Label(cab, text="Backup de dispositivos con compresión on-the-fly",
-                  font=("Segoe UI", 10), foreground="#666").pack(side="left")
-        ttk.Button(cab, text="❤ Ko-fi",
-                   command=lambda: webbrowser.open(URL_KOFI)).pack(side="right")
-        ttk.Button(cab, text="GitHub",
-                   command=lambda: webbrowser.open(URL_REPO)).pack(side="right", padx=6)
-        ttk.Button(cab, text="Refrescar",
-                   command=self.refrescar_dispositivos).pack(side="right", padx=6)
+        lbl_sub = ttk.Label(cab, font=("Segoe UI", 10), foreground="#666")
+        lbl_sub.pack(side="left")
+        self._i18n(lbl_sub, "subtitulo")
 
-        ppal = ttk.Frame(self, padding=(14, 0, 14, 14))
+        self.cmb_idioma = ttk.Combobox(cab, values=["Español", "English"],
+                                       state="readonly", width=10)
+        self.cmb_idioma.set("Español")
+        self.cmb_idioma.bind("<<ComboboxSelected>>", self._cambiar_idioma)
+        self.cmb_idioma.pack(side="right")
+        lbl_idi = ttk.Label(cab)
+        lbl_idi.pack(side="right", padx=(0, 6))
+        self._i18n(lbl_idi, "idioma")
+
+        sub = ttk.Frame(self, padding=(14, 0, 14, 0))
+        sub.pack(fill="x")
+        b_kofi = ttk.Button(sub, command=lambda: webbrowser.open(URL_KOFI))
+        b_kofi.pack(side="right")
+        self._i18n(b_kofi, "kofi")
+        b_gh = ttk.Button(sub, command=lambda: webbrowser.open(URL_REPO))
+        b_gh.pack(side="right", padx=6)
+        self._i18n(b_gh, "github")
+        b_win = ttk.Button(sub, command=self.buscar_windows)
+        b_win.pack(side="right", padx=6)
+        self._i18n(b_win, "buscar_windows")
+        b_ref = ttk.Button(sub, command=self.refrescar_dispositivos)
+        b_ref.pack(side="right", padx=6)
+        self._i18n(b_ref, "refrescar")
+
+        ppal = ttk.Frame(self, padding=(14, 8, 14, 14))
         ppal.pack(fill="both", expand=True)
 
         cols = ("ruta", "modelo", "tamano", "bus")
         self.arbol = ttk.Treeview(ppal, columns=cols, show="tree headings", height=12)
-        self.arbol.heading("#0", text="")
         self.arbol.column("#0", width=24, stretch=False)
-        for c, t, w, anc in (
-            ("ruta", "Dispositivo", 220, "w"),
-            ("modelo", "Modelo / Partición", 320, "w"),
-            ("tamano", "Tamaño", 120, "e"),
-            ("bus", "Bus / Tipo", 120, "w"),
-        ):
-            self.arbol.heading(c, text=t)
+        for c, w, anc in (("ruta", 220, "w"), ("modelo", 320, "w"),
+                          ("tamano", 120, "e"), ("bus", 120, "w")):
             self.arbol.column(c, width=w, anchor=anc)
         self.arbol.pack(fill="both", expand=True, pady=(0, 10))
 
-        ops = ttk.LabelFrame(ppal, text="Opciones", padding=10)
-        ops.pack(fill="x", pady=(0, 8))
-        ttk.Label(ops, text="Formato:").pack(side="left")
+        self.ops = ttk.LabelFrame(ppal, padding=10)
+        self.ops.pack(fill="x", pady=(0, 8))
+        self._i18n(self.ops, "opciones", atrib="text")
+        lbl_fmt = ttk.Label(self.ops)
+        lbl_fmt.pack(side="left")
+        self._i18n(lbl_fmt, "formato")
         self.formato = tk.StringVar(value="gz")
-        for etiqueta, val in (
-            ("img.gz", "gz"),
-            ("img.zip", "zip"),
-            ("img.tar.gz", "tar.gz"),
-            ("img (sin comprimir)", "raw"),
-        ):
-            ttk.Radiobutton(ops, text=etiqueta, variable=self.formato, value=val).pack(side="left", padx=6)
+        for etiqueta, val in (("img.gz", "gz"), ("img.zip", "zip"), ("img.tar.gz", "tar.gz")):
+            ttk.Radiobutton(self.ops, text=etiqueta, variable=self.formato, value=val).pack(side="left", padx=6)
+        self.rb_raw = ttk.Radiobutton(self.ops, variable=self.formato, value="raw")
+        self.rb_raw.pack(side="left", padx=6)
+        self._i18n(self.rb_raw, "formato_sin_comp")
         self.calc_hash = tk.BooleanVar(value=True)
-        ttk.Checkbutton(ops, text="Calcular SHA-256 (verificable)",
-                        variable=self.calc_hash).pack(side="left", padx=(20, 0))
+        self.chk_hash = ttk.Checkbutton(self.ops, variable=self.calc_hash)
+        self.chk_hash.pack(side="left", padx=(20, 0))
+        self._i18n(self.chk_hash, "calc_hash")
 
         acc = ttk.Frame(ppal)
         acc.pack(fill="x", pady=(0, 8))
-        self.btn_crear = ttk.Button(acc, text="Crear backup…", command=self.iniciar_backup)
+        self.btn_crear = ttk.Button(acc, command=self.iniciar_backup)
         self.btn_crear.pack(side="right")
-        self.btn_verificar = ttk.Button(acc, text="Verificar backup…", command=self.iniciar_verificacion)
+        self._i18n(self.btn_crear, "crear_backup")
+        self.btn_verificar = ttk.Button(acc, command=self.iniciar_verificacion)
         self.btn_verificar.pack(side="right", padx=6)
-        self.btn_cancelar = ttk.Button(acc, text="Cancelar", command=self.cancelar, state="disabled")
+        self._i18n(self.btn_verificar, "verificar_backup")
+        self.btn_cancelar = ttk.Button(acc, command=self.cancelar, state="disabled")
         self.btn_cancelar.pack(side="right", padx=6)
+        self._i18n(self.btn_cancelar, "cancelar")
 
         self.barra = ttk.Progressbar(ppal, mode="determinate", maximum=1000)
         self.barra.pack(fill="x")
-        txt = "Listo." if es_admin() else "AVISO: se requieren permisos de Administrador."
-        self.estado = ttk.Label(ppal, text=txt, anchor="w")
+        self.estado = ttk.Label(ppal, anchor="w")
         self.estado.pack(fill="x", pady=(8, 0))
 
     def refrescar_dispositivos(self):
@@ -533,7 +1200,7 @@ class Aplicacion(tk.Tk):
         try:
             self.dispositivos = listar_dispositivos()
         except Exception as e:
-            messagebox.showerror(NOMBRE_APP, f"Error al listar dispositivos:\n{e}")
+            messagebox.showerror(NOMBRE_APP, t("err_listar", e=e))
             self.dispositivos = []
             return
         for d in self.dispositivos:
@@ -548,7 +1215,26 @@ class Aplicacion(tk.Tk):
                     values=(p["ruta"], p["modelo"], tamano_legible(p["tamano"]), p.get("bus", "")),
                 )
                 self.indice_filas[id_part] = p
-        self.estado.configure(text=f"{len(self.dispositivos)} disco(s) detectado(s).")
+        self.estado.configure(text=t("n_discos", n=len(self.dispositivos)))
+
+    def buscar_windows(self):
+        self.estado.configure(text=t("buscando_win"))
+        self.update_idletasks()
+        encontradas = []
+        for d in self.dispositivos:
+            for p in d.get("particiones", []):
+                letra = p.get("letra")
+                if not letra:
+                    continue
+                version = detectar_windows_en_particion(letra)
+                if version:
+                    encontradas.append((letra, version))
+        if not encontradas:
+            messagebox.showinfo(NOMBRE_APP, t("win_no_encontradas"))
+            self.estado.configure(text=t("listo"))
+            return
+        self.estado.configure(text=t("listo"))
+        DialogoWindows(self, encontradas)
 
     def _seleccionado(self):
         sel = self.arbol.selection()
@@ -558,14 +1244,14 @@ class Aplicacion(tk.Tk):
 
     def iniciar_backup(self):
         if not es_admin():
-            messagebox.showerror(NOMBRE_APP, "Se requieren permisos de Administrador para leer dispositivos.")
+            messagebox.showerror(NOMBRE_APP, t("err_admin"))
             return
         d = self._seleccionado()
         if not d:
-            messagebox.showinfo(NOMBRE_APP, "Selecciona un disco o partición de la lista.")
+            messagebox.showinfo(NOMBRE_APP, t("sel_disp"))
             return
         if not d.get("tamano"):
-            if not messagebox.askyesno(NOMBRE_APP, "No se conoce el tamaño. ¿Continuar?"):
+            if not messagebox.askyesno(NOMBRE_APP, t("tam_desconocido")):
                 return
         f = self.formato.get()
         ext = {"gz": ".img.gz", "zip": ".img.zip", "tar.gz": ".img.tar.gz", "raw": ".img"}[f]
@@ -575,17 +1261,16 @@ class Aplicacion(tk.Tk):
         sufijo = "_part" if d.get("tipo") == "particion" else ""
         por_defecto = f"tkz_backup_{nombre_seguro}{sufijo}{ext}"
         salida = filedialog.asksaveasfilename(
-            title="Guardar backup como…",
+            title=t("guardar_como"),
             defaultextension=ext,
             initialfile=por_defecto,
-            filetypes=[("TKZ Backup", "*" + ext), ("Todos", "*.*")],
+            filetypes=[("TKZ Backup", "*" + ext), ("*.*", "*.*")],
         )
         if not salida:
             return
         confirmar = messagebox.askyesno(
             NOMBRE_APP,
-            f"Crear backup de:\n  {d['ruta']}\n  {d['modelo']}  ({tamano_legible(d['tamano'])})\n\n"
-            f"Destino:\n  {salida}\n\n¿Continuar?",
+            t("confirmar_backup", r=d["ruta"], m=d["modelo"], t=tamano_legible(d["tamano"]), o=salida),
         )
         if not confirmar:
             return
@@ -593,7 +1278,7 @@ class Aplicacion(tk.Tk):
         self.btn_crear.configure(state="disabled")
         self.btn_verificar.configure(state="disabled")
         self.btn_cancelar.configure(state="normal")
-        self.estado.configure(text=f"Iniciando backup de {d['ruta']}…")
+        self.estado.configure(text=t("iniciando", r=d["ruta"]))
         self.trabajo = TrabajadorBackup(
             d["ruta"], d["tamano"], salida, f,
             self.calc_hash.get(), self._cb_progreso, self._cb_fin_backup,
@@ -602,11 +1287,8 @@ class Aplicacion(tk.Tk):
 
     def iniciar_verificacion(self):
         ruta = filedialog.askopenfilename(
-            title="Selecciona el backup a verificar…",
-            filetypes=[
-                ("TKZ Backup", "*.gz *.zip *.tgz *.img"),
-                ("Todos", "*.*"),
-            ],
+            title=t("sel_verificar"),
+            filetypes=[("TKZ Backup", "*.gz *.zip *.tgz *.img"), ("*.*", "*.*")],
         )
         if not ruta:
             return
@@ -619,14 +1301,12 @@ class Aplicacion(tk.Tk):
             except Exception:
                 esperado = None
         else:
-            if messagebox.askyesno(NOMBRE_APP,
-                                   "No se encontró el sidecar .sha256.\n"
-                                   "¿Introducir el hash manualmente?"):
+            if messagebox.askyesno(NOMBRE_APP, t("no_sidecar")):
                 dlg = tk.Toplevel(self)
-                dlg.title("Hash SHA-256")
+                dlg.title("SHA-256")
                 dlg.transient(self)
                 dlg.grab_set()
-                tk.Label(dlg, text="SHA-256 esperado (deja vacío para solo calcular):").pack(padx=12, pady=(12, 4))
+                tk.Label(dlg, text=t("hash_label")).pack(padx=12, pady=(12, 4))
                 ent = tk.Entry(dlg, width=72)
                 ent.pack(padx=12, pady=(0, 8))
                 resultado = {"v": None}
@@ -641,14 +1321,14 @@ class Aplicacion(tk.Tk):
         self.btn_crear.configure(state="disabled")
         self.btn_verificar.configure(state="disabled")
         self.btn_cancelar.configure(state="normal")
-        self.estado.configure(text=f"Verificando {os.path.basename(ruta)}…")
+        self.estado.configure(text=t("verificando", f=os.path.basename(ruta)))
         self.trabajo = VerificadorBackup(ruta, esperado, self._cb_progreso, self._cb_fin_verif)
         self.trabajo.start()
 
     def cancelar(self):
         if self.trabajo:
             self.trabajo.cancelar()
-            self.estado.configure(text="Cancelando…")
+            self.estado.configure(text=t("cancelando"))
 
     def _cb_progreso(self, copiado, total, transcurrido):
         def upd():
@@ -677,13 +1357,13 @@ class Aplicacion(tk.Tk):
             self._resetear_botones()
             if err is None:
                 self.barra["value"] = 1000
-                msg = "Backup completado correctamente."
+                msg = t("completado_msg")
                 if hash_hex:
-                    msg += f"\n\nSHA-256:\n{hash_hex}\n\nGuardado en .sha256 junto al backup."
-                self.estado.configure(text="Backup completado.")
+                    msg += t("sha_guardado", h=hash_hex)
+                self.estado.configure(text=t("estado_completado"))
                 messagebox.showinfo(NOMBRE_APP, msg)
             elif err == "cancelado":
-                self.estado.configure(text="Cancelado por el usuario.")
+                self.estado.configure(text=t("cancelado_user"))
             else:
                 self.estado.configure(text=f"Error: {err}")
                 messagebox.showerror(NOMBRE_APP, err)
@@ -693,7 +1373,7 @@ class Aplicacion(tk.Tk):
         def upd():
             self._resetear_botones()
             if err == "cancelado":
-                self.estado.configure(text="Verificación cancelada.")
+                self.estado.configure(text=t("verif_cancelada"))
                 return
             if err is not None:
                 self.estado.configure(text=f"Error: {err}")
@@ -701,14 +1381,14 @@ class Aplicacion(tk.Tk):
                 return
             self.barra["value"] = 1000
             if coincide is None:
-                self.estado.configure(text="Hash calculado (sin comparar).")
-                messagebox.showinfo(NOMBRE_APP, f"SHA-256 calculado:\n{hex_calc}")
+                self.estado.configure(text=t("hash_calculado"))
+                messagebox.showinfo(NOMBRE_APP, t("hash_msg", h=hex_calc))
             elif coincide:
-                self.estado.configure(text="Integridad OK ✓")
-                messagebox.showinfo(NOMBRE_APP, f"Integridad verificada correctamente.\n\nSHA-256:\n{hex_calc}")
+                self.estado.configure(text=t("integ_ok"))
+                messagebox.showinfo(NOMBRE_APP, t("integ_ok_msg", h=hex_calc))
             else:
-                self.estado.configure(text="Integridad FALLIDA ✗")
-                messagebox.showerror(NOMBRE_APP, f"El hash NO coincide.\n\nCalculado:\n{hex_calc}")
+                self.estado.configure(text=t("integ_fail"))
+                messagebox.showerror(NOMBRE_APP, t("integ_fail_msg", h=hex_calc))
         self.after(0, upd)
 
 
